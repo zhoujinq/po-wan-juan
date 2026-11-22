@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 防止误提交在仓库内初始化的私人数据；实际数据目录必须放在仓库之外
+/data/
+/private-data/
+/inbox/
+/profile/
+/daily/
+/notes/
+/weekly/
+/memory/
+/state/
+/runtime/

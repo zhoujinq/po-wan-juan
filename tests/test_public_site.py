@@ -1,3 +1,4 @@
+import re
 import unittest
 from collections import Counter
 from html.parser import HTMLParser
@@ -73,8 +74,13 @@ class PublicSiteTests(unittest.TestCase):
     def test_skill_tree_is_complete(self):
         expected = [
             "SKILL.md",
+            "references/carrier-workflows.md",
             "references/data-and-templates.md",
+            "references/knowledge-map-example.md",
+            "references/knowledge-map-interview.md",
+            "references/knowledge-map-template.md",
             "references/reading-and-evaluation.md",
+            "references/reading-card-template.md",
             "scripts/powanjuan.py",
             "scripts/windows-reminder.ps1",
         ]
@@ -82,6 +88,30 @@ class PublicSiteTests(unittest.TestCase):
             path = ROOT / "po-wan-juan" / relative
             self.assertTrue(path.is_file(), relative)
             self.assertGreater(path.stat().st_size, 100, relative)
+
+    def test_skill_files_do_not_leak_project_internal_terms(self):
+        skill_files = [path for path in (ROOT / "po-wan-juan").rglob("*") if path.is_file()]
+        self.assertGreaterEqual(len(skill_files), 10)
+        for path in skill_files:
+            text = path.read_text(encoding="utf-8-sig").lower()
+            self.assertIsNone(
+                re.search(r"(?<![a-z0-9])m[0-5](?![a-z0-9])", text),
+                f"{path.name} 含内部里程碑代号",
+            )
+            for marker in ["前身", "继承", "inherited-", "主人", "本版未实现", "《愿景》"]:
+                self.assertNotIn(marker, text, f"{path.name} 含不应公开的内部表述：{marker}")
+
+    def test_skill_declares_reading_card_flow_and_optional_map(self):
+        skill = (ROOT / "po-wan-juan" / "SKILL.md").read_text(encoding="utf-8-sig")
+        for phrase in [
+            "知识地图与预访谈是可选步骤",
+            "地图未就绪",
+            "references/carrier-workflows.md",
+            "references/reading-card-template.md",
+            "dedupe-items",
+            "--require-sections",
+        ]:
+            self.assertIn(phrase, skill)
 
     def test_github_and_onboarding_paths_are_visible(self):
         self.assertGreaterEqual(self.html.count("https://github.com/zhoujinq/po-wan-juan"), 4)

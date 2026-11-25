@@ -4,27 +4,38 @@ param(
     [ValidatePattern('^([01]\d|2[0-3]):[0-5]\d$')]
     [string]$Time = '22:00',
     [switch]$ShowReminder,
+    [switch]$PrintPrompt,
     [switch]$Uninstall
 )
 
 $ErrorActionPreference = 'Stop'
 $TaskName = '破万卷-每日投喂提醒'
 
+function Get-FeedPrompt {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$Day
+    )
+
+    # 投喂提示词：与“逐条出阅读卡片，再写日摘”的流程保持一致。
+    return @"
+请使用破万卷处理我今天发给你的微信聊天记录：出阅读卡片＋日摘。
+
+1. 先将原始记录原样保存到：$Root\inbox\$Day.md（不改写原文）。
+2. 按条拆分并去重，逐条按载体阅读；读不到的也保留卡片并如实写明状态，不假装读过。
+3. 每条出一张阅读卡片，保存到：$Root\cards\$Day\ ；再写今日日摘：$Root\daily\$Day.md，分隔线前正文不超过400字。
+4. 没有知识地图时，「与知识地图的关系」和「与你何干」都写「地图未就绪」，不要编造。
+5. 如果今天是周日，再按 ISO-8601 周完成周总结，只推荐一篇最值得我亲自读的文章。
+
+下面我粘贴今日记录：
+"@
+}
+
 function Show-NativeReminder {
     param([Parameter(Mandatory = $true)][string]$Root)
 
     Add-Type -AssemblyName System.Windows.Forms
-    $day = Get-Date -Format 'yyyy-MM-dd'
-    $prompt = @"
-请使用破万卷处理我今天发给你的微信聊天记录。
-
-1. 先将原始记录保存到：$Root\inbox\$day.md
-2. 阅读、去重并关联我的目标与评测集，保留来源和未读全文标记。
-3. 生成今日洞察，分隔线前正文不超过400字，同时保存完整阅读索引。
-4. 如果今天是周日，再按 ISO-8601 周完成周总结，只推荐一篇最值得我亲自读的文章。
-
-下面我粘贴今日记录：
-"@
+    $prompt = Get-FeedPrompt -Root $Root -Day (Get-Date -Format 'yyyy-MM-dd')
     $message = "今晚的记录，不必都由你读。`n`n请把今天的微信聊天记录粘贴给你的 Agent。点击确定后会复制一段投喂提示词；没有新内容时可以直接略过。"
     $choice = [System.Windows.Forms.MessageBox]::Show(
         $message,
@@ -51,6 +62,16 @@ function Show-NativeReminder {
             )
         }
     }
+}
+
+if ($PrintPrompt) {
+    if (-not $DataRoot) {
+        $DataRoot = Join-Path ([Environment]::GetFolderPath('MyDocuments')) '破万卷'
+    }
+    # 只打印投喂提示词：不弹窗、不创建计划任务，也不创建任何目录。
+    [Console]::OutputEncoding = New-Object -TypeName System.Text.UTF8Encoding -ArgumentList $false
+    Write-Output (Get-FeedPrompt -Root $DataRoot -Day (Get-Date -Format 'yyyy-MM-dd'))
+    exit 0
 }
 
 if ($ShowReminder) {

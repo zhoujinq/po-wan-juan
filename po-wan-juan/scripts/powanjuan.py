@@ -10,6 +10,7 @@ import re
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 try:
     from zoneinfo import ZoneInfo
@@ -237,6 +238,111 @@ def command_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+def normalize_url(value: str) -> str:
+    """统一协议、域名大小写、首尾空白与锚点；路径和查询参数原样保留。"""
+    text = value.strip()
+    try:
+        parts = urlsplit(text)
+        path = "" if parts.path == "/" else parts.path
+        return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, parts.query, ""))
+    except ValueError:
+        return text
+
+
+def normalize_path(value: str) -> str:
+    """按 Windows 习惯比较附件路径：不区分大小写，统一分隔符。"""
+    return value.strip().replace("\\", "/").rstrip("/").lower()
+
+
+def item_key(item: dict) -> tuple[str, str] | None:
+    """返回（键类型, 规范化键）。优先用链接，其次文字，最后附件路径；都没有则返回 None。"""
+    if str(item.get("url", "")).strip():
+        return "url", normalize_url(str(item["url"]))
+    if str(item.get("text", "")).strip():
+        compact = re.sub(r"\s+", "", str(item["text"]))
+        return "text", hashlib.sha256(compact.encode("utf-8")).hexdigest()
+    if str(item.get("path", "")).strip():
+        return "path", normalize_path(str(item["path"]))
+    return None
+
+
+def command_dedupe_items(args: argparse.Namespace) -> int:
+    path = Path(args.file).expanduser().resolve()
+    log_file = None
+    day = None
+    if args.root:
+        log_file = root_path(args.root) / "state" / "item-log.jsonl"
+        day = parse_day(None, root_path(args.root))
+    try:
+        items = []
+        for number, line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"第 {number} 行不是合法 JSON：{exc.msg}") from exc
+            if not isinstance(item, dict) or not str(item.get("id", "")).strip():
+                raise ValueError(f"第 {number} 行缺少非空的 id。")
+            items.append(item)
+
+        seen: dict[tuple[str | None, str | None], str] = {}
+        if log_file and log_file.exists():
+            for line in log_file.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                seen[(record.get("key_kind"), record.get("key"))] = record.get("id")
+
+        unique_ids, duplicates, new_records = [], [], []
+        recorded_at = datetime.now(timezone.utc).isoformat()
+        for item in items:
+            key = item_key(item)
+            if key is None:  # 没有可比较的内容：保留，不参与去重
+                unique_ids.append(item["id"])
+                continue
+            if key in seen:
+                duplicates.append({"id": item["id"], "first_id": seen[key], "key_kind": key[0]})
+                continue
+            seen[key] = item["id"]
+            unique_ids.append(item["id"])
+            new_records.append({
+                "key_kind": key[0],
+                "key": key[1],
+                "id": item["id"],
+                "date": day.isoformat() if day else None,
+                "recorded_at": recorded_at,
+            })
+
+        committed = False
+        if args.commit and log_file and new_records:
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            with log_file.open("a", encoding="utf-8", newline="\n") as handle:
+                for record in new_records:
+                    handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+            committed = True
+    except (OSError, ValueError) as exc:
+        emit({"ok": False, "error": str(exc), "file": str(path)})
+        return 1
+
+    emit({
+        "ok": True,
+        "file": str(path),
+        "total": len(items),
+        "unique_count": len(unique_ids),
+        "duplicate_count": len(duplicates),
+        "unique_ids": unique_ids,
+        "duplicates": duplicates,
+        "committed": committed,
+        "log": str(log_file) if args.commit and log_file else None,
+        "rule": "同一 URL（忽略域名大小写与锚点）、去除空白后相同的文字、同一附件路径只算一条；默认只检查不写入。",
+    })
+    return 0
+
+
 def week_info(day: date, root: Path | None = None) -> dict:
     iso = day.isocalendar()
     monday = day - timedelta(days=day.weekday())
@@ -326,6 +432,12 @@ def build_parser() -> argparse.ArgumentParser:
     source.add_argument("--file")
     source.add_argument("--text")
     ingest.set_defaults(func=command_ingest)
+
+    dedupe = sub.add_parser("dedupe-items", help="按链接、文字或附件路径做条目级去重")
+    dedupe.add_argument("--file", required=True, help="条目清单 JSONL：每行含 id，以及 url、text、path 之一")
+    dedupe.add_argument("--root", help="可选数据目录：读取历史去重记录，配合 --commit 追加")
+    dedupe.add_argument("--commit", action="store_true", help="把首次出现的条目写入 state/item-log.jsonl")
+    dedupe.set_defaults(func=command_dedupe_items)
 
     week = sub.add_parser("week", help="计算 ISO-8601 周标签与起止日期")
     week.add_argument("--date", help="YYYY-MM-DD，默认按配置时区取当天")

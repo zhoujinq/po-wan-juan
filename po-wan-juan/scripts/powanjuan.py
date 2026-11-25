@@ -19,6 +19,7 @@ except ImportError:  # pragma: no cover
 
 SCHEMA_VERSION = 1
 DAILY_LIMIT = 400
+DAILY_SECTIONS = ("最值得知道", "与你何干", "留给你判断")
 
 # 初始化时写入的空白知识地图：状态固定为“待确认”，访谈是可选步骤。
 KNOWLEDGE_MAP_TEMPLATE = """# 知识地图
@@ -377,16 +378,26 @@ def command_validate_daily(args: argparse.Namespace) -> int:
     text = path.read_text(encoding="utf-8-sig")
     body = re.split(r"\r?\n---\r?\n", text, maxsplit=1)[0]
     count = len(re.sub(r"\s+", "", body))
-    ok = count <= args.limit
+    missing_sections = [name for name in DAILY_SECTIONS if name not in body]
+    require_sections = getattr(args, "require_sections", False)
+    too_long = count > args.limit
     emit({
-        "ok": ok,
+        "ok": not too_long and not (require_sections and missing_sections),
         "file": str(path),
         "count_non_whitespace": count,
         "limit": args.limit,
         "remaining": args.limit - count,
         "rule": "第一个独立 --- 分隔线前的全部非空白字符，含标题。",
+        "require_sections": require_sections,
+        "sections": list(DAILY_SECTIONS),
+        "missing_sections": missing_sections,
+        "sections_rule": "开启 --require-sections 时正文须包含这三个小节；缺失时退出码为 3，字数超限仍为 2。",
     })
-    return 0 if ok else 2
+    if too_long:
+        return 2
+    if require_sections and missing_sections:
+        return 3
+    return 0
 
 
 def command_status(args: argparse.Namespace) -> int:
@@ -447,6 +458,11 @@ def build_parser() -> argparse.ArgumentParser:
     validate = sub.add_parser("validate-daily", help="校验每日正文非空白字符数")
     validate.add_argument("--file", required=True)
     validate.add_argument("--limit", type=int, default=DAILY_LIMIT)
+    validate.add_argument(
+        "--require-sections",
+        action="store_true",
+        help="同时要求正文包含“最值得知道、与你何干、留给你判断”，缺失时退出码为 3",
+    )
     validate.set_defaults(func=command_validate_daily)
 
     status = sub.add_parser("status", help="检查当天文件、档案确认状态和周信息")

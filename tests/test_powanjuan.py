@@ -208,6 +208,48 @@ class PowanjuanTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertFalse(result["ok"])
 
+    def write_daily(self, body):
+        daily = Path(self.temp.name) / "daily.md"
+        daily.write_text(body + "\n\n---\n\n## 来源\n- 虚构来源", encoding="utf-8")
+        return str(daily)
+
+    def test_validate_daily_reports_missing_sections_without_failing_by_default(self):
+        file = self.write_daily("# 2026-11-25 · 今日洞察\n\n今天没有值得打断你的内容。")
+        code, result = self.call(powanjuan.command_validate_daily, file=file, limit=400)
+        self.assertEqual(code, 0)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["missing_sections"], ["最值得知道", "与你何干", "留给你判断"])
+
+    def test_validate_daily_require_sections_rejects_incomplete_digest(self):
+        file = self.write_daily("**最值得知道**：一条虚构信息。\n\n**与你何干**：地图未就绪。")
+        code, result = self.call(
+            powanjuan.command_validate_daily, file=file, limit=400, require_sections=True
+        )
+        self.assertEqual(code, 3)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["missing_sections"], ["留给你判断"])
+
+    def test_validate_daily_require_sections_accepts_three_sections(self):
+        file = self.write_daily(
+            "# 2026-11-25 · 今日洞察\n\n"
+            "**最值得知道**：一条虚构信息。\n\n"
+            "**与你何干**：地图未就绪。\n\n"
+            "**留给你判断**：一个虚构问题。"
+        )
+        code, result = self.call(
+            powanjuan.command_validate_daily, file=file, limit=400, require_sections=True
+        )
+        self.assertEqual(code, 0)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["missing_sections"], [])
+
+    def test_validate_daily_reports_length_before_structure(self):
+        file = self.write_daily("字" * 401)
+        code, result = self.call(
+            powanjuan.command_validate_daily, file=file, limit=400, require_sections=True
+        )
+        self.assertEqual(code, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

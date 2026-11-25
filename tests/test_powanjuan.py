@@ -98,6 +98,30 @@ class PowanjuanTests(unittest.TestCase):
         self.assertEqual(result["week"]["label"], "2026-W47")
         self.assertFalse(result["files"]["daily"]["exists"])
 
+    def test_init_creates_pending_knowledge_map_and_card_dir(self):
+        code, result = self.init_root()
+        self.assertEqual(code, 0)
+        knowledge_map = self.root / "profile" / "knowledge-map.md"
+        self.assertTrue(knowledge_map.is_file())
+        text = knowledge_map.read_text(encoding="utf-8")
+        self.assertIn("待确认", text)
+        self.assertIn("隐私红线", text)
+        self.assertIn("Agent 假设", text)
+        self.assertIn("Asia/Shanghai", text)
+        self.assertTrue((self.root / "cards").is_dir())
+        self.assertNotIn("完成两轮蒸馏访谈", result["next"])
+        self.assertIn("可选", result["next"])
+
+    def test_init_never_overwrites_edited_knowledge_map(self):
+        self.init_root()
+        knowledge_map = self.root / "profile" / "knowledge-map.md"
+        self.assertTrue(knowledge_map.is_file())
+        knowledge_map.write_text("# 虚构测试地图\n", encoding="utf-8")
+        code, second = self.init_root()
+        self.assertEqual(code, 0)
+        self.assertTrue(second["already_present"])
+        self.assertEqual(knowledge_map.read_text(encoding="utf-8"), "# 虚构测试地图\n")
+
 
 if __name__ == "__main__":
     unittest.main()

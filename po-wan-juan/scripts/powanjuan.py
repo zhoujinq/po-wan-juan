@@ -19,6 +19,72 @@ except ImportError:  # pragma: no cover
 SCHEMA_VERSION = 1
 DAILY_LIMIT = 400
 
+# 初始化时写入的空白知识地图：状态固定为“待确认”，访谈是可选步骤。
+KNOWLEDGE_MAP_TEMPLATE = """# 知识地图
+
+- 状态：待确认
+- 版本：v0.1
+- 创建日期：{created}
+- 最后确认：未确认
+- 本地时区：{timezone}
+- 修订与回滚：修改前复制版本，并在 `profile/revisions.jsonl` 记录旧内容、新内容、来源、确认与回滚指向。
+
+## 阅读边界总览
+
+| 区域 | 当前边界 | 下一小步 | 条目ID |
+|---|---|---|---|
+| 已掌握 |  |  |  |
+| 正在学 |  |  |  |
+| 明确不懂 / 暂不碰 |  |  |  |
+
+## 事实（可独立核对）
+
+| ID | 事实 | 来源 | 日期 | 置信度 | 最后确认 |
+|---|---|---|---|---|---|
+| F-001 |  |  |  | 高/中/低 |  |
+
+## 用户自述（目标、经验、偏好与红线）
+
+| ID | 分类 | 自述 | 来源 | 日期 | 置信度 | 最后确认 |
+|---|---|---|---|---|---|---|
+| U-001 | 已掌握/正在学/暂不碰/90天目标/瓶颈/信息源/隐私红线 |  |  |  | 高/中/低 |  |
+
+## 90天目标与现实约束
+
+| 目标ID | 结果与验收方式 | 当前瓶颈 | 每周亲读预算 | 关联自述ID |
+|---|---|---|---|---|
+| G-001 |  |  |  |  |
+
+## 主要信息源与可信边界
+
+| 来源 | 用途 | 是否可作一手证据 | 关联区域 | 备注 |
+|---|---|---|---|---|
+|  |  | 是/否/需核查 |  |  |
+
+## Agent 假设（只能放待确认区）
+
+| ID | 假设 | 依据 | 来源 | 日期 | 置信度 | 待用户确认的问题 |
+|---|---|---|---|---|---|---|
+| A-001 |  |  |  |  | 低/中 |  |
+
+## 待确认区
+
+- [ ] 条目ID：待确认内容；来源；日期；需要用户判断什么。
+
+## 隐私红线
+
+- 禁止读取：
+- 禁止引用或公开：
+- 禁止推断：
+- 可读取但必须留在本地：
+
+## 修订记录
+
+| 日期 | 版本 | 修改摘要 | 用户确认 | 回滚指向 |
+|---|---|---|---|---|
+|  |  |  |  |  |
+"""
+
 
 def emit(data: dict) -> None:
     print(json.dumps(data, ensure_ascii=False, indent=2))
@@ -62,7 +128,7 @@ def command_init(args: argparse.Namespace) -> int:
         root.mkdir(parents=True)
         created.append(str(root))
     for name in (
-        "profile", "inbox", "notes", "daily", "weekly", "memory", "state", "runtime"
+        "profile", "inbox", "cards", "notes", "daily", "weekly", "memory", "state", "runtime"
     ):
         path = root / name
         if not path.exists():
@@ -88,6 +154,10 @@ def command_init(args: argparse.Namespace) -> int:
         "profile/self.md": "# 我是谁\n\n> 仅记录用户确认的事实、角色与现实约束，并注明来源和日期。\n",
         "profile/goals.md": "# 目标与长期主题\n\n## 未来90天\n\n## 长期主题\n",
         "profile/preferences.md": "# 已确认偏好\n\n> 保存可观察、可评测的规则，不保存空泛人格标签。\n",
+        "profile/knowledge-map.md": KNOWLEDGE_MAP_TEMPLATE.format(
+            created=datetime.now().astimezone().date().isoformat(),
+            timezone=args.timezone,
+        ),
         "profile/evaluation.jsonl": "",
         "profile/revisions.jsonl": "",
         "state/ingest-log.jsonl": "",
@@ -102,7 +172,7 @@ def command_init(args: argparse.Namespace) -> int:
         "root": str(root),
         "created": created,
         "already_present": not created,
-        "next": "完成两轮蒸馏访谈，经用户确认后执行 confirm-profile。",
+        "next": "知识地图已建立，状态为“待确认”；访谈是可选步骤，用户明确要求时再进行。经用户确认后执行 confirm-profile。",
     })
     return 0
 
